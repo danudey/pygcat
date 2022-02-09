@@ -1,0 +1,112 @@
+#!/home/dan/bin/python3
+
+import os
+import io
+import sys
+
+import pathlib
+import tempfile
+import subprocess
+
+from subprocess import Popen, PIPE
+
+from pygments import highlight
+from pygments.styles.solarized import SolarizedLightStyle
+from pygments.formatters.terminal256 import TerminalTrueColorFormatter
+from pygments.lexers import get_lexer_for_filename
+
+from pygments.util import ClassNotFound as PygNotFound
+
+from rich import print
+from rich.console import Console
+from rich.markdown import Markdown
+
+import pydoc
+
+# The maximum size we're willing to buffer in memory
+MAX_PROCESSING_SIZE = 1024*1024*10
+MDV_CONFIG_PATH = pathlib.Path("~/.mdv").expanduser()
+
+class FakeTTYIO(io.StringIO):
+    def isatty(self):
+        return True
+
+def is_cat():
+    """ Are we running as cat? """
+    return sys.argv[0].endswith("cat")
+
+def run_less():
+    """Output our data to the real "less")"""
+
+
+def is_less():
+    """ Are we running as less? """
+    return sys.argv[0].endswith("less")
+
+
+def use_whatever():
+    """ Decide what to use, less or cat """
+    if is_cat():
+        use_cat()
+    elif is_less():
+        use_less()
+    else:
+        print("I don't know what the heck to do")
+        sys.exit(0)
+
+
+def use_cat():
+    """
+    Executes /bin/cat instead of doing anything else.
+    """
+    os.execv("/bin/cat", ["/bin/cat"] + sys.argv[1:])
+
+
+def use_less():
+    """
+    Executes /usr/bin/less instead of doing anything else.
+    """
+    os.execv("/usr/bin/less", ["/usr/bin/less"] + sys.argv[1:])
+
+
+def main():
+    """
+    Main method; check our args and input/output, then try lexing and
+    see where that gets us.
+    """
+    if len(sys.argv) != 2:
+        # We didn't get any parameters, or we got too many parameters,
+        # so probably we're being piped or something?
+        use_whatever()
+    if not all((sys.stdout.isatty(), sys.stdin.isatty())):
+        # Input or output isn't a TTY, so we're being used as a pipe?
+        use_whatever()
+
+    try:
+        lexer = get_lexer_for_filename(sys.argv[1])
+    except PygNotFound:
+        use_whatever()
+
+    if os.stat(sys.argv[1]).st_size > MAX_PROCESSING_SIZE:
+        use_whatever()
+
+    file_data = open(sys.argv[1], encoding="utf-8").read()
+
+    if lexer.name == "Markdown":
+        console = Console(file=io.StringIO(), force_terminal=True)
+        md = Markdown(file_data, hyperlinks=True)
+        console.print(md)
+        data = console.file.getvalue()
+    else:
+        formatter = TerminalTrueColorFormatter(style=SolarizedLightStyle, linenos=True)
+        data = highlight(file_data, lexer, formatter)
+
+    if is_cat():
+        sys.stdout.write(data)
+    else:
+        os.environ["LESS"] = "-Sr"
+        pydoc.pager(data)
+
+
+if __name__ == "__main__":
+    main()
